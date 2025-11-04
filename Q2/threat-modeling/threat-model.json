@@ -1,0 +1,510 @@
+{
+  "threatModel": {
+    "metadata": {
+      "title": "Layer 2 Blockchain Security Threat Model",
+      "version": "1.0",
+      "date": "2025-11-03",
+      "methodology": "STRIDE",
+      "scope": "Layer 2 Blockchain Financial Application",
+      "author": "Security Analysis Team"
+    },
+    "systemDescription": {
+      "overview": "Layer 2 blockchain solution for financial applications with bridge contracts, DEX, and banking functionality",
+      "components": [
+        "L2 Bridge Contract",
+        "Decentralized Exchange (DEX)",
+        "Banking/Vault Contract",
+        "User Wallets",
+        "Operator Nodes",
+        "Smart Contract Layer"
+      ],
+      "trustBoundaries": [
+        "User <-> Smart Contract",
+        "Smart Contract <-> Operator",
+        "Layer 1 <-> Layer 2",
+        "User <-> DEX"
+      ]
+    },
+    "threats": [
+      {
+        "id": "T001",
+        "category": "Spoofing",
+        "threat": "Double-Spending Attack on L2 Bridge",
+        "description": "Attacker attempts to withdraw the same funds multiple times by exploiting lack of proper nonce management and replay protection in Layer 2 bridge",
+        "layer": "Transaction Layer",
+        "severity": "CRITICAL",
+        "likelihood": "HIGH",
+        "impact": "HIGH",
+        "stride": {
+          "spoofing": true,
+          "tampering": true,
+          "repudiation": false,
+          "informationDisclosure": false,
+          "denialOfService": false,
+          "elevationOfPrivilege": true
+        },
+        "attackVector": {
+          "entry": "Bridge withdrawal function",
+          "technique": "Transaction replay with modified parameters",
+          "prerequisites": [
+            "Valid initial deposit",
+            "Knowledge of transaction hash generation",
+            "Ability to submit multiple transactions"
+          ],
+          "steps": [
+            "Deposit funds to L2 bridge",
+            "Initiate legitimate withdrawal with transaction hash",
+            "Generate similar transaction hashes with slight parameter variations",
+            "Submit multiple withdrawal requests before state update",
+            "Exploit weak transaction hash validation to withdraw multiple times"
+          ]
+        },
+        "mitigations": [
+          {
+            "id": "M001",
+            "strategy": "Implement strict nonce tracking per user",
+            "implementation": "Add mapping(address => uint256) public nonces and increment on each transaction",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureL2Bridge.sol:nonces"
+          },
+          {
+            "id": "M002",
+            "strategy": "Use Merkle tree verification for withdrawals",
+            "implementation": "Require cryptographic proof via MerkleProof.verify() for each withdrawal",
+            "effectiveness": "HIGH",
+            "cost": "MEDIUM",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureL2Bridge.sol:initiateWithdrawal"
+          },
+          {
+            "id": "M003",
+            "strategy": "Implement challenge period for large withdrawals",
+            "implementation": "7-day delay for withdrawals exceeding threshold with fraud proof mechanism",
+            "effectiveness": "MEDIUM",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureL2Bridge.sol:CHALLENGE_PERIOD"
+          },
+          {
+            "id": "M004",
+            "strategy": "Atomic batch processing validation",
+            "implementation": "Pre-validate total amounts before processing any batch withdrawal",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureL2Bridge.sol:batchWithdraw"
+          }
+        ],
+        "residualRisk": "LOW",
+        "testCoverage": "test/SecurityTests.js:testDoubleSpendingPrevention"
+      },
+      {
+        "id": "T002",
+        "category": "Tampering",
+        "threat": "Reentrancy Attack on Smart Contracts",
+        "description": "Attacker exploits external call before state update to recursively call withdrawal function and drain contract funds",
+        "layer": "Application Layer",
+        "severity": "CRITICAL",
+        "likelihood": "HIGH",
+        "impact": "CRITICAL",
+        "stride": {
+          "spoofing": false,
+          "tampering": true,
+          "repudiation": false,
+          "informationDisclosure": false,
+          "denialOfService": false,
+          "elevationOfPrivilege": true
+        },
+        "attackVector": {
+          "entry": "Withdrawal function with external call",
+          "technique": "Recursive callback exploitation",
+          "prerequisites": [
+            "Contract performs external call before state update",
+            "Attacker controls receiving contract with fallback function",
+            "Sufficient gas for multiple recursive calls"
+          ],
+          "steps": [
+            "Deploy attacker contract with malicious fallback/receive function",
+            "Deposit funds to vulnerable bank contract",
+            "Call withdrawal function",
+            "Receive funds in fallback function",
+            "Re-enter withdrawal function before balance is updated",
+            "Repeat until contract is drained or gas runs out"
+          ]
+        },
+        "mitigations": [
+          {
+            "id": "M005",
+            "strategy": "Implement ReentrancyGuard modifier",
+            "implementation": "Use OpenZeppelin's ReentrancyGuard contract with nonReentrant modifier",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureBank.sol:ReentrancyGuard"
+          },
+          {
+            "id": "M006",
+            "strategy": "Follow Checks-Effects-Interactions pattern",
+            "implementation": "Update all state variables before making external calls",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureBank.sol:withdraw"
+          },
+          {
+            "id": "M007",
+            "strategy": "Use transfer() instead of call() for ETH transfers",
+            "implementation": "transfer() forwards only 2300 gas, preventing complex reentrancy",
+            "effectiveness": "MEDIUM",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureBank.sol:withdrawSafe"
+          },
+          {
+            "id": "M008",
+            "strategy": "Implement mutex locks",
+            "implementation": "Use boolean flag to prevent concurrent execution",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "OpenZeppelin ReentrancyGuard implementation"
+          }
+        ],
+        "residualRisk": "VERY LOW",
+        "testCoverage": "test/SecurityTests.js:testReentrancyPrevention"
+      },
+      {
+        "id": "T003",
+        "category": "Information Disclosure",
+        "threat": "Front-Running Attack on DEX Transactions",
+        "description": "Malicious actors monitor mempool for pending transactions and submit similar transactions with higher gas fees to profit from price manipulation",
+        "layer": "Network Layer",
+        "severity": "HIGH",
+        "likelihood": "VERY HIGH",
+        "impact": "MEDIUM",
+        "stride": {
+          "spoofing": false,
+          "tampering": false,
+          "repudiation": false,
+          "informationDisclosure": true,
+          "denialOfService": false,
+          "elevationOfPrivilege": false
+        },
+        "attackVector": {
+          "entry": "Public transaction mempool",
+          "technique": "Transaction ordering manipulation",
+          "prerequisites": [
+            "Ability to monitor mempool",
+            "Sufficient funds for gas price competition",
+            "Fast transaction submission capability"
+          ],
+          "steps": [
+            "Monitor mempool for large DEX swap transactions",
+            "Identify profitable opportunities (e.g., user swapping large amount)",
+            "Submit front-running transaction with higher gas price",
+            "Execute trade before victim's transaction",
+            "Price shifts in attacker's favor",
+            "Victim receives worse rate due to price impact",
+            "Optionally submit back-running transaction to profit further"
+          ]
+        },
+        "mitigations": [
+          {
+            "id": "M009",
+            "strategy": "Implement slippage protection",
+            "implementation": "Require minAmountOut parameter and revert if actual output is less",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureDEX.sol:swapAForBSecure"
+          },
+          {
+            "id": "M010",
+            "strategy": "Add transaction deadline",
+            "implementation": "Require deadline parameter and revert if block.timestamp exceeds it",
+            "effectiveness": "MEDIUM",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureDEX.sol:deadline check"
+          },
+          {
+            "id": "M011",
+            "strategy": "Implement rate limiting",
+            "implementation": "Limit frequency of trades per address to prevent rapid manipulation",
+            "effectiveness": "MEDIUM",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureDEX.sol:RATE_LIMIT_PERIOD"
+          },
+          {
+            "id": "M012",
+            "strategy": "Use commit-reveal scheme for large trades",
+            "implementation": "Two-phase trading: commit hash first, reveal details after delay",
+            "effectiveness": "HIGH",
+            "cost": "MEDIUM",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureDEX.sol:commitTrade"
+          },
+          {
+            "id": "M013",
+            "strategy": "Private transaction pools",
+            "implementation": "Use Flashbots or similar MEV protection services",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": false,
+            "code_reference": "External service integration recommended"
+          }
+        ],
+        "residualRisk": "MEDIUM",
+        "testCoverage": "test/SecurityTests.js:testFrontRunningPrevention"
+      },
+      {
+        "id": "T004",
+        "category": "Denial of Service",
+        "threat": "Sybil Attack on Consensus Layer",
+        "description": "Attacker creates multiple fake identities to gain disproportionate influence over network consensus or resource allocation",
+        "layer": "Consensus Layer",
+        "severity": "HIGH",
+        "likelihood": "MEDIUM",
+        "impact": "HIGH",
+        "stride": {
+          "spoofing": true,
+          "tampering": false,
+          "repudiation": false,
+          "informationDisclosure": false,
+          "denialOfService": true,
+          "elevationOfPrivilege": true
+        },
+        "attackVector": {
+          "entry": "Node registration or validator participation",
+          "technique": "Identity multiplication",
+          "prerequisites": [
+            "Low cost of creating new identities",
+            "Weak identity verification",
+            "No stake or reputation requirements"
+          ],
+          "steps": [
+            "Create multiple node identities",
+            "Register nodes in network",
+            "Gain voting power proportional to node count",
+            "Influence consensus decisions",
+            "Potentially halt network or approve fraudulent transactions"
+          ]
+        },
+        "mitigations": [
+          {
+            "id": "M014",
+            "strategy": "Implement Proof of Stake (PoS) consensus",
+            "implementation": "Require significant stake deposit for validator participation",
+            "effectiveness": "HIGH",
+            "cost": "ARCHITECTURAL",
+            "implemented": false,
+            "code_reference": "Requires consensus layer implementation"
+          },
+          {
+            "id": "M015",
+            "strategy": "Use reputation-based systems",
+            "implementation": "Track validator performance and penalize bad behavior",
+            "effectiveness": "MEDIUM",
+            "cost": "MEDIUM",
+            "implemented": false,
+            "code_reference": "Requires reputation tracking system"
+          },
+          {
+            "id": "M016",
+            "strategy": "Implement slashing conditions",
+            "implementation": "Automatically penalize validators for malicious behavior",
+            "effectiveness": "HIGH",
+            "cost": "MEDIUM",
+            "implemented": false,
+            "code_reference": "Requires consensus layer integration"
+          },
+          {
+            "id": "M017",
+            "strategy": "Set minimum stake thresholds",
+            "implementation": "Require minimum economic stake to participate in consensus",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": false,
+            "code_reference": "Requires stake management contract"
+          }
+        ],
+        "residualRisk": "MEDIUM",
+        "testCoverage": "Not applicable at smart contract level"
+      },
+      {
+        "id": "T005",
+        "category": "Elevation of Privilege",
+        "threat": "Smart Contract Access Control Bypass",
+        "description": "Unauthorized users gain access to privileged functions through missing or improper access control checks",
+        "layer": "Application Layer",
+        "severity": "HIGH",
+        "likelihood": "MEDIUM",
+        "impact": "HIGH",
+        "stride": {
+          "spoofing": false,
+          "tampering": true,
+          "repudiation": false,
+          "informationDisclosure": false,
+          "denialOfService": false,
+          "elevationOfPrivilege": true
+        },
+        "attackVector": {
+          "entry": "Privileged contract functions",
+          "technique": "Access control bypass",
+          "prerequisites": [
+            "Missing or weak access control modifiers",
+            "Uninitialized owner variables",
+            "Delegatecall vulnerabilities"
+          ],
+          "steps": [
+            "Identify privileged functions (pause, withdraw, updateConfig)",
+            "Attempt to call without proper authorization",
+            "Exploit missing require statements or modifiers",
+            "Gain administrative access",
+            "Modify critical contract parameters or drain funds"
+          ]
+        },
+        "mitigations": [
+          {
+            "id": "M018",
+            "strategy": "Implement role-based access control",
+            "implementation": "Use OpenZeppelin's AccessControl contract",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureL2Bridge.sol:onlyOperator"
+          },
+          {
+            "id": "M019",
+            "strategy": "Use function modifiers consistently",
+            "implementation": "Apply onlyOwner, onlyOperator modifiers to all privileged functions",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "All secure contracts use appropriate modifiers"
+          },
+          {
+            "id": "M020",
+            "strategy": "Initialize ownership in constructor",
+            "implementation": "Set owner in constructor to prevent initialization attacks",
+            "effectiveness": "HIGH",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "contracts/secure/SecureL2Bridge.sol:constructor"
+          },
+          {
+            "id": "M021",
+            "strategy": "Implement multi-signature requirements",
+            "implementation": "Require multiple approvals for critical operations",
+            "effectiveness": "HIGH",
+            "cost": "MEDIUM",
+            "implemented": false,
+            "code_reference": "Recommended for production deployment"
+          }
+        ],
+        "residualRisk": "LOW",
+        "testCoverage": "test/SecurityTests.js:testAccessControl"
+      },
+      {
+        "id": "T006",
+        "category": "Tampering",
+        "threat": "Integer Overflow/Underflow in Financial Calculations",
+        "description": "Arithmetic operations exceed maximum or minimum values, leading to unexpected behavior and fund loss",
+        "layer": "Application Layer",
+        "severity": "MEDIUM",
+        "likelihood": "LOW",
+        "impact": "HIGH",
+        "stride": {
+          "spoofing": false,
+          "tampering": true,
+          "repudiation": false,
+          "informationDisclosure": false,
+          "denialOfService": false,
+          "elevationOfPrivilege": false
+        },
+        "attackVector": {
+          "entry": "Mathematical operations in contracts",
+          "technique": "Overflow/underflow exploitation",
+          "prerequisites": [
+            "Solidity version < 0.8.0 without SafeMath",
+            "Unchecked arithmetic operations"
+          ],
+          "steps": [
+            "Identify arithmetic operations on user-controlled values",
+            "Craft inputs that cause overflow/underflow",
+            "Exploit wrapped values for unauthorized gains"
+          ]
+        },
+        "mitigations": [
+          {
+            "id": "M022",
+            "strategy": "Use Solidity 0.8.0+ with built-in overflow protection",
+            "implementation": "Compile with Solidity ^0.8.20 which has automatic checks",
+            "effectiveness": "HIGH",
+            "cost": "NONE",
+            "implemented": true,
+            "code_reference": "All contracts use pragma solidity ^0.8.20"
+          },
+          {
+            "id": "M023",
+            "strategy": "Validate calculation results",
+            "implementation": "Add explicit range checks for critical calculations",
+            "effectiveness": "MEDIUM",
+            "cost": "LOW",
+            "implemented": true,
+            "code_reference": "All contracts include require statements for validation"
+          }
+        ],
+        "residualRisk": "VERY LOW",
+        "testCoverage": "test/SecurityTests.js:testArithmeticSafety"
+      }
+    ],
+    "riskMatrix": {
+      "critical": ["T001", "T002"],
+      "high": ["T003", "T004", "T005"],
+      "medium": ["T006"],
+      "low": []
+    },
+    "recommendations": [
+      {
+        "priority": "CRITICAL",
+        "recommendation": "Deploy all mitigations for double-spending (T001) and reentrancy (T002) before production",
+        "rationale": "These vulnerabilities can lead to complete fund loss",
+        "timeline": "Immediate"
+      },
+      {
+        "priority": "HIGH",
+        "recommendation": "Implement comprehensive front-running protections including commit-reveal and private mempools",
+        "rationale": "Front-running directly impacts user experience and trust",
+        "timeline": "Before mainnet launch"
+      },
+      {
+        "priority": "HIGH",
+        "recommendation": "Conduct third-party security audit by reputable firm",
+        "rationale": "Independent validation of security measures",
+        "timeline": "Before mainnet launch"
+      },
+      {
+        "priority": "MEDIUM",
+        "recommendation": "Implement monitoring and alerting for suspicious activity patterns",
+        "rationale": "Early detection enables rapid response to attacks",
+        "timeline": "During testnet phase"
+      },
+      {
+        "priority": "MEDIUM",
+        "recommendation": "Establish bug bounty program with clear scope and rewards",
+        "rationale": "Incentivize responsible disclosure of vulnerabilities",
+        "timeline": "At mainnet launch"
+      },
+      {
+        "priority": "LOW",
+        "recommendation": "Develop incident response plan with clear escalation procedures",
+        "rationale": "Preparation reduces response time during security events",
+        "timeline": "Before mainnet launch"
+      }
+    ]
+  }
+}

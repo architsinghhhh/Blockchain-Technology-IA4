@@ -1,0 +1,30 @@
+{
+  "name": "layer2-security-analysis",
+  "version": "1.0.0",
+  "description": "Layer 2 Blockchain Security Analysis with Threat Modeling and Implementation",
+  "main": "index.js",
+  "scripts": {
+    "test": "hardhat test",
+    "test:verbose": "hardhat test --verbose",
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.js --network hardhat",
+    "analyze": "node threat-modeling/analyze.js",
+    "monitor": "node scripts/security-monitor.js",
+    "report": "node scripts/generate-report.js"
+  },
+  "keywords": [
+    "blockchain",
+    "security",
+    "layer2",
+    "threat-modeling",
+    "smart-contracts"
+  ],
+  "author": "Security Analysis Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@openzeppelin/contracts": "^5.4.0",
+    "ethers": "^6.15.0",
+    "hardhat": "^3.0.10"
+  }
+}

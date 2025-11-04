@@ -1,0 +1,24 @@
+{
+  "name": "supply-chain-blockchain",
+  "version": "1.0.1",
+  "description": "A blockchain-based supply chain tracking system using Solidity and Hyperledger Fabric integration.",
+  "main": "index.js",
+  "scripts": {
+    "compile": "npx hardhat compile",
+    "test": "npx hardhat test",
+    "deploy": "npx hardhat run scripts/deploy.js"
+  },
+  "keywords": [
+    "blockchain",
+    "supply-chain",
+    "solidity",
+    "hyperledger",
+    "fabric"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "hardhat": "^2.19.0"
+  }
+}
